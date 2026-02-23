@@ -11,5 +11,251 @@
   <body style="margin: 0; overflow: hidden; background-color: #000">
     <canvas id="canvas" style="display: block; touch-action: none"></canvas>
 
+    <script>
+      class SpaceEmoji {
+        constructor(canvasId) {
+          this.canvas = document.getElementById(canvasId);
+          this.ctx = this.canvas.getContext("2d", { alpha: false });
+
+          this.config = {
+            totalParticles: 700,
+            farZLimit: 3000,
+            focalLength: 1000,
+            baseSpeed: 3,
+            warpSpeed: 100,
+            accelerationRate: 0.05,
+            emojiLimit: 500,
+            motionTrailOpacity: 0.3,
+            minWarpSpeedThreshold: 30,
+            spawnSpreadRange: 5000,
+            rotationSpeedMultiplier: 0.0005,
+          };
+
+          this.sprites = [];
+          this.averageSpriteColors = [];
+
+          this.particles = {
+            posX: new Float32Array(this.config.totalParticles),
+            posY: new Float32Array(this.config.totalParticles),
+            posZ: new Float32Array(this.config.totalParticles),
+            rotation: new Float32Array(this.config.totalParticles),
+            baseSize: new Float32Array(this.config.totalParticles),
+            spriteIndex: new Uint16Array(this.config.totalParticles),
+          };
+
+          this.view = {
+            width: 0,
+            height: 0,
+            centerX: 0,
+            centerY: 0,
+            currentSpeed: this.config.baseSpeed,
+            targetSpeed: this.config.baseSpeed,
+          };
+
+          this.init();
+        }
+
+        init() {
+          this.generateEmojiAtlas();
+          this.handleResize();
+          this.populateInitialParticles();
+          this.attachEventListeners();
+          this.renderLoop();
+        }
+
+        generateEmojiAtlas() {
+          const unicodeRanges = [
+            [0x1f600, 0x1f64f],
+            [0x1f300, 0x1f3ff],
+            [0x1f900, 0x1f9ff],
+          ];
+
+          const colorSampler = document
+            .createElement("canvas")
+            .getContext("2d", { willReadFrequently: true });
+          colorSampler.canvas.width = colorSampler.canvas.height = 32;
+
+          for (const [start, end] of unicodeRanges) {
+            for (
+              let codePoint = start;
+              codePoint <= end && this.sprites.length < this.config.emojiLimit;
+              codePoint++
+            ) {
+              const emojiChar = String.fromCodePoint(codePoint);
+
+              const highResSprite = document.createElement("canvas");
+              highResSprite.width = highResSprite.height = 128;
+              const spriteCtx = highResSprite.getContext("2d");
+              spriteCtx.font = "100px serif";
+              spriteCtx.textAlign = "center";
+              spriteCtx.textBaseline = "middle";
+              spriteCtx.fillText(emojiChar, 64, 64);
+              this.sprites.push(highResSprite);
+
+              this.averageSpriteColors.push(
+                this.calculateAverageColor(colorSampler, emojiChar),
+              );
+            }
+          }
+        }
+
+        calculateAverageColor(samplerCtx, char) {
+          const sampleSize = 32;
+          const pixelStride = 16;
+          const alphaThreshold = 100;
+
+          samplerCtx.clearRect(0, 0, sampleSize, sampleSize);
+          samplerCtx.font = "24px serif";
+          samplerCtx.fillText(char, 4, 24);
+
+          const pixelData = samplerCtx.getImageData(
+            0,
+            0,
+            sampleSize,
+            sampleSize,
+          ).data;
+          let r = 0,
+            g = 0,
+            b = 0,
+            visiblePixelCount = 0;
+
+          for (let i = 0; i < pixelData.length; i += pixelStride) {
+            const alpha = pixelData[i + 3];
+            if (alpha > alphaThreshold) {
+              r += pixelData[i];
+              g += pixelData[i + 1];
+              b += pixelData[i + 2];
+              visiblePixelCount++;
+            }
+          }
+
+          return visiblePixelCount
+            ? `rgb(${r / visiblePixelCount},${g / visiblePixelCount},${b / visiblePixelCount})`
+            : "#ffffff";
+        }
+
+        resetParticleToFarHorizon(index, randomizeZ = false) {
+          const spread = this.config.spawnSpreadRange;
+          this.particles.posX[index] = (Math.random() - 0.5) * spread;
+          this.particles.posY[index] = (Math.random() - 0.5) * spread;
+          this.particles.posZ[index] = randomizeZ
+            ? Math.random() * this.config.farZLimit
+            : this.config.farZLimit;
+          this.particles.baseSize[index] = 40 + Math.random() * 120;
+          this.particles.rotation[index] = Math.random() * Math.PI * 2;
+          this.particles.spriteIndex[index] = Math.floor(
+            Math.random() * this.sprites.length,
+          );
+        }
+
+        populateInitialParticles() {
+          for (let i = 0; i < this.config.totalParticles; i++) {
+            this.resetParticleToFarHorizon(i, true);
+          }
+        }
+
+        handleResize() {
+          this.view.width = this.canvas.width = window.innerWidth;
+          this.view.height = this.canvas.height = window.innerHeight;
+          this.view.centerX = this.view.width / 2;
+          this.view.centerY = this.view.height / 2;
+        }
+
+        toggleWarpDrive(isEngaged) {
+          this.view.targetSpeed = isEngaged
+            ? this.config.warpSpeed
+            : this.config.baseSpeed;
+        }
+
+        attachEventListeners() {
+          window.addEventListener("resize", () => this.handleResize());
+          window.addEventListener("mousedown", () =>
+            this.toggleWarpDrive(true),
+          );
+          window.addEventListener("mouseup", () => this.toggleWarpDrive(false));
+          window.addEventListener(
+            "touchstart",
+            (e) => {
+              e.preventDefault();
+              this.toggleWarpDrive(true);
+            },
+            { passive: false },
+          );
+          window.addEventListener("touchend", () =>
+            this.toggleWarpDrive(false),
+          );
+        }
+
+        renderLoop() {
+          this.ctx.fillStyle = "#000";
+          this.ctx.globalAlpha = this.config.motionTrailOpacity;
+          this.ctx.fillRect(0, 0, this.view.width, this.view.height);
+
+          this.view.currentSpeed +=
+            (this.view.targetSpeed - this.view.currentSpeed) *
+            this.config.accelerationRate;
+
+          for (let i = 0; i < this.config.totalParticles; i++) {
+            this.particles.posZ[i] -= this.view.currentSpeed;
+
+            if (this.particles.posZ[i] <= 0) {
+              this.resetParticleToFarHorizon(i);
+            }
+
+            const perspectiveFactor =
+              this.config.focalLength / this.particles.posZ[i];
+            const screenX =
+              this.particles.posX[i] * perspectiveFactor + this.view.centerX;
+            const screenY =
+              this.particles.posY[i] * perspectiveFactor + this.view.centerY;
+            const scaleSize = this.particles.baseSize[i] * perspectiveFactor;
+
+            const isOffScreen =
+              screenX < -scaleSize ||
+              screenX > this.view.width + scaleSize ||
+              screenY < -scaleSize ||
+              screenY > this.view.height + scaleSize;
+
+            if (isOffScreen) continue;
+
+            const distanceFade = Math.max(
+              0,
+              Math.min(
+                1,
+                (1 - this.particles.posZ[i] / this.config.farZLimit) * 2,
+              ),
+            );
+
+            this.ctx.save();
+            this.ctx.globalAlpha = distanceFade;
+            this.ctx.translate(screenX, screenY);
+            this.ctx.rotate(
+              this.particles.rotation[i] +
+                this.particles.posZ[i] * this.config.rotationSpeedMultiplier,
+            );
+
+            if (this.view.currentSpeed > this.config.minWarpSpeedThreshold) {
+              this.ctx.shadowBlur = 10;
+              this.ctx.shadowColor =
+                this.averageSpriteColors[this.particles.spriteIndex[i]];
+            }
+
+            this.ctx.drawImage(
+              this.sprites[this.particles.spriteIndex[i]],
+              -scaleSize / 2,
+              -scaleSize / 2,
+              scaleSize,
+              scaleSize,
+            );
+            this.ctx.restore();
+          }
+
+          this.ctx.globalAlpha = 1;
+          requestAnimationFrame(() => this.renderLoop());
+        }
+      }
+
+      new SpaceEmoji("canvas");
+    </script>
   </body>
 </html>
