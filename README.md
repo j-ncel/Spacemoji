@@ -1,6 +1,8 @@
-# Spacemoji
+# [Spacemoji](https://j-ncel.github.io/Spacemoji/)
 
 A single-file HTML5 Canvas animation that simulates a journey through emoji-filled space. The experience features 3D perspective projection and a smooth warp transition.
+
+[**View Live Demo**](https://j-ncel.github.io/Spacemoji/)
 
 ![snapshot of spacemoju](snapshot.gif)
 
